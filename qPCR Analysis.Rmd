@@ -1,0 +1,617 @@
+---
+title: "QPCR"
+author: "QUINN LE"
+date: "DATE"
+output: html_document
+---
+#  Load packages
+```{r setup, include=FALSE}
+rm(list = ls())
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+library(readxl)
+library(data.table)
+
+
+library(dplyr)
+`%!in%` = Negate(`%in%`)
+
+```
+# Please load data and name as 'dlp' for dloop data and 'alb' for albumin data
+# Quality control: 
+## Check water has no signal
+## Drop samples that have no signal for mtDNA-CN
+```{r}
+# INPUT CORRESPONDING CSV PATH
+dlp <- read.csv("/Users/quinnmle/Documents/Castellani Lab/Mito_2026-03-03/dlp.csv")
+
+alb <- read.csv("/Users/quinnmle/Documents/Castellani Lab/Mito_2026-03-03/alb_adj.csv")
+
+removed_samples = as.data.frame(matrix(nrow = 1, ncol = 3))
+colnames(removed_samples) = c('Sample.Name', 'Well', 'Reason')
+dlp$Dlp_CT = dlp$Cт
+alb$Alb_CT = alb$Cт
+df = merge(dlp, alb, by = c('Well', 'Sample.Name')) 
+df$Dlp_CT <- as.numeric(as.character(df$Dlp_CT))
+df$Alb_CT <- as.numeric(as.character(df$Alb_CT))
+no_mt = subset(df, Dlp_CT > 26)
+#no_mt$Reason = 'D-loop CT > 26'
+#removed_samples = rbind(removed_samples, dplyr::select(no_mt, `Sample.Name`, `Well`, Reason))
+#subset(no_mt, `Sample.Name` == 'water') # check that water is here.
+df = subset(df, Dlp_CT <= 26)
+```
+## Calculate deltaCT
+```{r}
+df$deltaCT = df$Alb_CT - df$Dlp_CT
+```
+## Check for pipetting effects
+```{r}
+mydata_deltaCT = df
+colnames(mydata_deltaCT) = make.names(colnames(mydata_deltaCT))
+# Repurposed from Foram:
+rank.deltaCT = data.frame(matrix(NA, ncol = 6))
+names(rank.deltaCT) = c("Sample.Name", "Min.CT", "Mid.CT", 
+                        "Max.CT", "CT.Dlp.diff", "CT.Alb.diff")
+samplelist = levels(as.factor(mydata_deltaCT$Sample.Name))
+for (i in 1:length(samplelist)) {
+  test = subset(mydata_deltaCT, na.omit(Sample.Name == 
+                                          samplelist[i]))
+  test$Well = as.numeric(gsub("[A-Z]", "", test$Well))
+  test.ordered = test[order(test$Well), ]
+  test.ordered$deltaCT = as.numeric(test.ordered$deltaCT)
+  if (nrow(test) == 3) {
+    first = which(test.ordered$deltaCT == min(test.ordered$deltaCT), 
+                  arr.ind = T)
+    second = which(test.ordered$deltaCT == median(test.ordered$deltaCT), 
+                   arr.ind = T)
+    third = which(test.ordered$deltaCT == max(test.ordered$deltaCT), 
+                  arr.ind = T)
+    sample = test.ordered$Sample.Name[1]
+    ct.dlp.diff = test.ordered$Dlp_CT[1] - test.ordered$Dlp_CT[3]
+    ct.alb.diff = test.ordered$Alb_CT[1] - test.ordered$Alb_CT[3]
+    rank.deltaCT[i, ] = c(test$Sample.Name[1], first, 
+                          second, third, ct.dlp.diff, ct.alb.diff)
+  }
+}
+rank.deltaCT = na.omit(rank.deltaCT)
+rank.deltaCT$CT.Dlp.diff = as.numeric(rank.deltaCT$CT.Dlp.diff)
+rank.deltaCT$CT.Alb.diff = as.numeric(rank.deltaCT$CT.Alb.diff)
+Min = table(rank.deltaCT$Min.CT)
+Mid = table(rank.deltaCT$Mid.CT)
+Max = table(rank.deltaCT$Max.CT)
+#t = rbind(Min, Mid, Max)
+# Average CT difference between first and third replicate
+mean(rank.deltaCT$CT.Dlp.diff) 
+mean(rank.deltaCT$CT.Alb.diff)
+# Is there evidence of a pipetting order effect?
+```
+# Assign + adjust(?) for pipetting order
+```{r}
+data.deltaCT = mydata_deltaCT
+data.deltaCT.PO=data.frame(matrix(NA, ncol=6))
+colnames(data.deltaCT.PO)=c("Sample.Name","deltaCT","Well","PO", "Alb_CT", "Dlp_CT")
+samplelist=levels(as.factor(data.deltaCT$`Sample.Name`))
+for (i in 1:length(samplelist)){
+  test=subset(data.deltaCT, Sample.Name==samplelist[i])
+  test$Well.number=as.numeric(gsub("[A-Z]","",test$Well))
+  test$Well.letter=gsub("[0-9]","",test$Well)
+  test.ordered=test[order(test$Well.letter, test$Well.number),]
+  test.ordered$deltaCT=as.numeric(test.ordered$deltaCT)
+  if (nrow(test.ordered)>1){
+    test.ordered$PO=1:nrow(test.ordered)
+    test.ordered = dplyr::select(test.ordered, "Sample.Name","deltaCT","Well","PO", "Alb_CT", "Dlp_CT")
+    data.deltaCT.PO=rbind(data.deltaCT.PO, test.ordered)
+  }
+}
+data.deltaCT.PO <- na.omit(data.deltaCT.PO)
+# Visualize pipetting effect
+ggplot(data.deltaCT.PO, aes(as.factor(PO), deltaCT)) + geom_boxplot() + xlab('Pipetting order')
+# Adjust for PO?
+lm(deltaCT ~ PO, data = data.deltaCT.PO) %>% summary
+# Not significant, not going to adjust.
+# data.deltaCT.PO$deltaCT.POadjust = resid(lm(deltaCT ~ PO, data = data.deltaCT.PO))
+df = data.deltaCT.PO
+```
+## Drop samples that have too much variation between replicates
+```{r}
+colnames(removed_samples) = make.names(colnames(removed_samples))
+library(raster)
+# Get coefficients of variation for each sample
+df %>% group_by(Sample.Name) %>% summarise(cv= cv(deltaCT)) -> coefs
+# Plot density
+ggplot(coefs, aes(cv)) + geom_density()
+# For samples with CVs greater than 15%, drop the biggest outlier and recheck CV
+high = subset(coefs, cv > 15)
+for(i in 1:nrow(high))
+{
+  test = subset(df, Sample.Name == high$Sample.Name[i])
+  
+  if(nrow(test) > 2){
+    
+    # testing standard deviation of different combos
+    # Makes new variables named by Wellpositions
+    assign(test$Well[1],sd(test$deltaCT[2:3])) 
+    assign(test$Well[2],sd(test$deltaCT[c(1,3)]))
+    assign(test$Well[3],sd(test$deltaCT[1:2]))
+    bad.sample=min(as.numeric(mget(test$Well)))
+    bad.sample2=test[which(bad.sample==mget(test$Well)),c("Sample.Name","Well")]
+    bad.sample2$Reason = 'CV too high'
+    
+    # Add to removed samples
+    removed_samples = plyr::rbind.fill(removed_samples, bad.sample2)
+    
+    # Drop the most extreme
+    df %>% filter(Well != bad.sample2$Well) -> df
+  }
+}
+```
+## Drop anything that still has a high CV
+```{r}
+df %>% group_by(Sample.Name) %>% summarise(cv= cv(deltaCT)) -> coefs
+bad.samps = subset(coefs, cv > 15)
+bad = subset(df, Sample.Name %in% bad.samps$Sample.Name)
+#bad$Reason = 'CV still too high after filtering'
+#removed_samples = rbind(removed_samples, bad)
+df = subset(df, Sample.Name %!in% bad.samps$Sample.Name)
+```
+## Remove samples with only one replicate left
+```{r}
+df %>% group_by(Sample.Name) %>% summarise(count= n()) -> number
+number$Sample.Name[which(number$count == 1)]
+oneleft = subset(df, Sample.Name %in% number$Sample.Name[which(number$count == 1)])
+#oneleft$Reason = 'Only one replicate left'
+removed_samples = rbind(removed_samples, oneleft)
+df = subset(df, Sample.Name %!in% number$Sample.Name[which(number$count == 1)])
+```
+
+# QC
+```{r}
+
+
+data_for_filtering <- df
+data_for_filtering$Sample <- data_for_filtering$Sample.Name
+print("n to move forward for filtering, including controls:")
+nrow(data_for_filtering)
+print("n to move forward for filtering, no controls:")
+subset(data_for_filtering, Sample != "Water") %>% nrow()
+data_for_filtering <- subset(data_for_filtering, Sample != "Water")
+
+```
+
+## Samples with NA DLP CT or ALB CT
+```{r}
+DLP_ALB_CT_NA_sample <- subset(data_for_filtering, is.na(Dlp_CT) | is.na(Alb_CT))
+print("n samples with NA DLP_CT or ALB_CT")
+nrow(DLP_ALB_CT_NA_sample)
+```
+
+## Samples with DLP CT greater than 26
+```{r}
+DLP_over26_sample <- subset(data_for_filtering, Dlp_CT > 26)
+print("n samples with DLP_CT > 26")
+nrow(DLP_over26_sample)
+```
+
+## Samples with ALB CT more than 3 SD in any direction
+```{r}
+highALB <- mean(data_for_filtering$Alb_CT) + (2* (sd(data_for_filtering$Alb_CT)))
+lowALB <- mean(data_for_filtering$Alb_CT) - (2* (sd(data_for_filtering$Alb_CT)))
+
+highALB_sample <- subset(data_for_filtering, Alb_CT > highALB)
+print("highALB samples")
+nrow(highALB_sample)
+
+lowALB_sample <- subset(data_for_filtering, Alb_CT < lowALB)
+print("lowALB samples")
+nrow(lowALB_sample)
+
+# lowALB_sample$qc_assessment <- c('ALB CT < 3 SD from the mean')
+# highALB_sample$qc_assessment <- c('ALB CT > 3 SD from the mean')
+```
+
+## Samples with deltaCT more than 3 SD in any direction
+```{r}
+highDCT <- mean(data_for_filtering$deltaCT) + (3*(sd(data_for_filtering$deltaCT)))
+lowDCT <- mean(data_for_filtering$deltaCT) - (3*(sd(data_for_filtering$deltaCT)))
+
+
+highDCT_sample <- subset(data_for_filtering, deltaCT > highDCT)
+print("high deltaCT samples")
+nrow(highDCT_sample)
+
+lowDCT_sample <- subset(data_for_filtering, deltaCT < lowDCT)
+print("low deltaCT samples")
+nrow(lowDCT_sample)
+
+#lowDCT_sample$qc_assessment <- c('deltaCT < 3 SD from the mean')
+#highDCT_sample$qc_assessment <- c('deltaCT > 3 SD from the mean')
+```
+
+## Removing samples
+```{r}
+data_for_filtering <- subset(data_for_filtering, Dlp_CT <= 26)
+print("n samples after removing >26 DLP CT")
+subset(data_for_filtering, Dlp_CT <= 26) %>% nrow()
+after_df <- subset(data_for_filtering, Dlp_CT <= 26)
+
+data_for_filtering <- subset(data_for_filtering, Alb_CT > lowALB & Alb_CT < highALB)
+print("n samples after removing extreme ALB")
+subset(data_for_filtering, Alb_CT > lowALB & Alb_CT < highALB) %>% nrow()
+after_df <- subset(after_df, Alb_CT > lowALB & Alb_CT < highALB)
+
+data_for_filtering <- subset(data_for_filtering, deltaCT > lowDCT & deltaCT < highDCT)
+print("n samples after removing extreme delta CT")
+subset(data_for_filtering, deltaCT > lowDCT & deltaCT < highDCT) %>% nrow()
+after_df <- subset(after_df, deltaCT > lowDCT & deltaCT < highDCT)
+```
+## Fold Change
+```{r}
+after_df$Sample <- as.factor(after_df$Sample)
+
+
+order(after_df$Sample)
+after_df
+
+# WT_NC_dCt_mean <- mean(after_df$deltaCT[after_df$Sample.Name == "NC3.Sham.1"])
+# KO11_NC_dCt_mean <- mean(after_df$deltaCT[after_df$Sample.Name == "KO5.Sham.1"])
+# KO11_A_dCt_mean <- mean(after_df$deltaCT[after_df$Sample.Name == "KO5.A.1"])
+# KO11_B_dCt_mean <- mean(after_df$deltaCT[after_df$Sample.Name == "KO5.B.1"])
+# KO11_C_dCt_mean <- mean(after_df$deltaCT[after_df$Sample.Name == "KO5.C.1"])
+# KO11_D_dCt_mean <- mean(after_df$deltaCT[after_df$Sample.Name == "KO5.D.1"])
+
+WT_NC_dCt_mean <- mean(after_df$deltaCT[after_df$Sample.Name == "WT_SHAM"])
+KO11_NC_dCt_mean <- mean(after_df$deltaCT[after_df$Sample.Name == "KO_SHAM"])
+KO11_A_dCt_mean <- mean(after_df$deltaCT[after_df$Sample.Name == "KO_A"])
+KO11_B_dCt_mean <- mean(after_df$deltaCT[after_df$Sample.Name == "KO_B"])
+KO11_C_dCt_mean <- mean(after_df$deltaCT[after_df$Sample.Name == "KO_C"])
+KO11_D_dCt_mean <- mean(after_df$deltaCT[after_df$Sample.Name == "KO_D"])
+
+
+fold_change <- c(2^(KO11_A_dCt_mean-KO11_NC_dCt_mean), 
+                 2^(KO11_B_dCt_mean-KO11_NC_dCt_mean), 
+                 2^(KO11_C_dCt_mean-KO11_NC_dCt_mean),
+                 2^(KO11_D_dCt_mean-KO11_NC_dCt_mean))
+
+fold_change
+
+library(dplyr)
+library(ggplot2)
+
+# ---- Step 1: Define groups ----
+plot_data <- data %>%
+  mutate(
+    group = case_when(
+      type == "KO_A" ~ "KO_A",
+      type == "KO_B" ~ "KO_B",
+      type == "KO_C" ~ "KO_C",
+      type == "KO_D" ~ "KO_D",
+      type == "KO_SHAM" ~ "KO_SHAM",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(group))
+
+# ---- Step 2: Get reference mean (KO_SHAM) ----
+ref_mean <- plot_data %>%
+  filter(group == "KO_SHAM") %>%
+  summarise(mean_ref = mean(deltaCT, na.rm = TRUE)) %>%
+  pull(mean_ref)
+
+# ---- Step 3: Summarise ALL groups ----
+fc_df <- plot_data %>%
+  group_by(group) %>%
+  summarise(
+    n = sum(!is.na(deltaCT)),
+    mean_dCt = mean(deltaCT, na.rm = TRUE),
+    sd_dCt = sd(deltaCT, na.rm = TRUE),
+    se_dCt = sd_dCt / sqrt(n),
+    tcrit = qt(0.975, df = n - 1),  # 90% CI
+    .groups = "drop"
+  ) %>%
+  mutate(
+    ddct = mean_dCt - ref_mean,
+    ddct_lower = ddct - tcrit * se_dCt,
+    ddct_upper = ddct + tcrit * se_dCt,
+
+    # YOUR definition
+    fold_change = 2^(ddct),
+    fc_lower = 2^(ddct_lower),
+    fc_upper = 2^(ddct_upper)
+  ) %>%
+  filter(group != "KO_SHAM") %>%  # remove reference from plot if you want
+  mutate(
+    group = factor(group, levels = c("KO_A", "KO_B", "KO_C", "KO_D"))
+  )
+
+# ---- Step 4: Plot ----
+p <- ggplot(fc_df, aes(x = group, y = fold_change)) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  
+  geom_point(size = 3) +
+  
+  geom_errorbar(
+    aes(ymin = fc_lower, ymax = fc_upper),
+    width = 0.12
+  ) +
+  
+  scale_y_continuous(
+    breaks = c(0, 1, 2, 4, 6, 8, 10)
+  ) +
+  
+  labs(
+    title = "Fold Change vs KO Sham",
+    x = NULL,
+    y = "Fold Change"
+  ) +
+  
+  theme_classic()
+
+print(p)
+
+# ---- Step 5: Save ----
+ggsave(
+  "fold_change_CI.png",
+  plot = p,
+  width = 6,
+  height = 4,
+  dpi = 300
+)
+
+
+
+```
+
+
+
+
+## Replot after QC
+```{r}
+after_df <- data_for_filtering
+
+# plot_grid(ggplot(after_df, aes(x = Alb_CT %>% as.numeric())) +
+#             geom_density(alpha = 0.5) + xlab('ALB CT') + ylab('Density') +
+#             geom_rug() + theme_bw(),
+#           ggplot(after_df, aes(x = Dlp_CT %>% as.numeric())) +
+#             geom_density(alpha = 0.5) + xlab('DLP CT') + ylab('Density') +
+#             geom_rug() + theme_bw(),
+#           ggplot(after_df, aes(x = deltaCT %>% as.numeric())) +
+#             geom_density(alpha = 0.5) + xlab('Delta CT') + ylab('Density') +
+#             geom_rug() + theme_bw(),
+#           nrow = 1, ncol = 3)
+ggplot(after_df, aes(x = Alb_CT %>% as.numeric())) +
+            geom_density(alpha = 0.5) + xlab('ALB CT') + ylab('Density') +
+            geom_rug() + theme_bw()
+          ggplot(after_df, aes(x = Dlp_CT %>% as.numeric())) +
+            geom_density(alpha = 0.5) + xlab('DLP CT') + ylab('Density') +
+            geom_rug() + theme_bw()
+          ggplot(after_df, aes(x = deltaCT %>% as.numeric())) +
+            geom_density(alpha = 0.5) + xlab('Delta CT') + ylab('Density') +
+            geom_rug() + theme_bw()
+```
+
+## Summary of low quality samples to be removed
+```{r}
+print("Samples with ALB CT > 3 SD in any direction")
+lowALB_sample$Sample 
+highALB_sample$Sample
+
+print("Samples with DLP CT > 26")
+DLP_over26_sample$Sample
+
+print("Samples with delta CT > 3 SD in any direction")
+lowDCT_sample$Sample
+highDCT_sample$Sample
+```
+
+```{r}
+df <- after_df
+#df <- subset(df, df$Sample.Name != "KO11_B")
+setwd("/Users/quinnmle/Documents/Castellani Lab/Mito_2026-03-18")
+write.csv(df, "qpcr_results.csv", quote=F)
+
+df <- subset(df, df$Sample.Name != "hgdna")
+
+df2 <- df[,c("Sample.Name", "deltaCT", "Alb_CT","Dlp_CT")]
+data.deltaCT.PO.clean <- df2
+ meanlist=levels(as.factor(data.deltaCT.PO.clean$Sample.Name))
+  data.means=data.frame(matrix(NA, ncol=4))
+  names(data.means)=c("Sample","deltaCT.mean","CT.Alb", "CT.Dlp")
+  for (i in 1:length(meanlist)){
+    sample.test=meanlist[i]
+    if (nrow(na.omit(subset(data.deltaCT.PO.clean, Sample.Name==sample.test)))==1){
+      mean.delta=mean.adjusted=mean.Dlp=mean.Alb=NA
+    } else {
+      mean.delta=mean(as.numeric(na.omit(subset(data.deltaCT.PO.clean, Sample.Name==sample.test)$deltaCT)))
+      mean.Dlp=mean(as.numeric(na.omit(subset(data.deltaCT.PO.clean, Sample.Name==sample.test)$Dlp_CT)))
+      mean.Alb=mean(as.numeric(na.omit(subset(data.deltaCT.PO.clean, Sample.Name==sample.test)$Alb_CT)))
+       sd.test=sd(as.numeric(na.omit(subset(data.deltaCT, Sample.Name==sample.test)$deltaCT)))
+    }
+    data.means[i,]=c(sample.test,mean.delta,mean.Alb, mean.Dlp)
+    data.means$deltaCT.mean <- as.numeric(data.means$deltaCT.mean)
+  }
+ # merged.means <- rbind(merged.means, data.means)
+#Data Analysis
+ # merged.clean.replicates <- merged.clean.replicates[!is.na(merged.clean.replicates$Sample),]
+#  merged.clean.replicates$Sample <- as.factor(merged.clean.replicates$Sample)
+  #merged.means <- merged.means[!is.na(merged.means$Sample),]
+#  data.means$Sample.Name <- as.factor(data.means$Sample.Name)
+
+  # EDIT LABELS AND RANGES!
+forPlot <- df2[order(df2$Sample),]
+#forPlot$type <- c("NC")
+#forPlot$type[1:3] <- c("TFAM KO11")
+#forPlot$type[4:6] <- c("TFAM KO5")
+#forPlot$type[7:8] <- c("TFAM KO6")
+#forPlot$type[9:11] <- c("TFAM NC1")
+#forPlot$type[12:14] <- c("TFAM NC2")
+#forPlot$type[15:17] <- c("TFAM NC")
+
+data <- forPlot
+for (i in 1:nrow(data)){
+  data$type[i]=data$Sample.Name[i]
+}
+#data <- forPlot
+library(ggplot2)
+
+# ARRANGE THE LABELS ACCORDING TO THE ORDER YOU WANT TO SEE THEM IN"
+data$type <- factor(data$type, levels=c("WT_SHAM","KO_SHAM", "KO_C", "KO_B", "KO_A", "KO_D"))
+
+#setwd("/Users/Christina/Desktop/MonochromePlates/")
+
+data$Dlp_CT <- as.numeric(data$Dlp_CT)
+data$Alb_CT <- as.numeric(data$Alb_CT)
+minC <- min(data$deltaCT)
+minD <- min(data$Dlp_CT)
+minA <- min(data$Alb_CT)
+
+# NAME YOUR PDF, GGTITLE SHOULD BE YOUR ORIGINAL CSV
+pdf(file = "deltaCt_adj.pdf", width = 10)
+ggplot(data) + geom_boxplot(aes(col=type, x=type, y=deltaCT)) +  ggtitle("deltaCt_adj") + ylab("deltaCt") + theme(legend.title=element_blank(), axis.title = element_text(face="bold")) + geom_point(aes(col=type, x=type, y=deltaCT), position=position_dodge(0.75)) +  theme(axis.text.x=element_text(angle = 45, hjust = 1), plot.margin = margin(1, 0.2, 1.5, 2, "cm"), text = element_text(size=10), axis.title.x=element_blank(), legend.title=element_blank()) + ylim(minC-0.2, minC+5.5)
+
+
+dev.off()
+
+
+# NAME YOUR PDF, GGTITLE SHOULD BE YOUR ORIGINAL DLP CSV
+pdf(file = "dlp.pdf", width = 10)
+ggplot(data) + geom_boxplot(aes(col=type, x=type, y=Dlp_CT)) +  ggtitle("Dlp") + ylab("Dlp_CT") + theme(legend.title=element_blank(), axis.title = element_text(face="bold")) + geom_point(aes(col=type, x=type, y=Dlp_CT), position=position_dodge(0.75)) +  theme(axis.text.x=element_text(angle = 45, hjust = 1), plot.margin = margin(1, 0.2, 1.5, 2, "cm"), text = element_text(size=10), axis.title.x=element_blank(), legend.title=element_blank()) + ylim(minD-0.2,minD+5.5)
+dev.off()
+
+# NAME YOUR PDF, GGTITLE SHOULD BE YOUR ORIGINAL ALB CSV
+pdf(file = "alb_adj.pdf", width = 10)
+ggplot(data) + geom_boxplot(aes(col=type, x=type, y=Alb_CT)) +  ggtitle("Alb_adj") + ylab("Alb_CT") + theme(legend.title=element_blank(), axis.title = element_text(face="bold")) + geom_point(aes(col=type, x=type, y=Alb_CT), position=position_dodge(0.75)) +  theme(axis.text.x=element_text(angle = 45, hjust = 1), plot.margin = margin(1, 0.2, 1.5, 2, "cm"), text = element_text(size=10), axis.title.x=element_blank(), legend.title=element_blank()) + ylim(minA-0.2, minA+5.5)
+dev.off()
+
+```
+```{r}
+ # Make sure types are set and deltaCT is numeric
+data$type <- droplevels(as.factor(data$Sample.Name))
+data$deltaCT <- as.numeric(data$deltaCT)
+
+# Pairwise t-tests (Welch by default); adjust p-values
+pw <- pairwise.t.test(
+  x = data$deltaCT,
+  g = data$type,
+  p.adjust.method = "bonferroni"   # or "bonferroni"
+)
+
+
+t.test(deltaCT ~ type, data = subset(data, type %in% c("KO_SHAM", "KO_A")))
+t.test(deltaCT ~ type, data = subset(data, type %in% c("KO_SHAM", "KO_B")))
+t.test(deltaCT ~ type, data = subset(data, type %in% c("KO_SHAM", "KO_C")))
+# t.test(deltaCT ~ type, data = subset(data, type %in% c("KO_SHAM", "KO_D")))
+t.test(deltaCT ~ type, data = subset(data, type %in% c("KO_SHAM", "WT_SHAM")))
+t.test(deltaCT ~ type, data = subset(data, type %in% c("WT_SHAM", "KO_A")))
+t.test(deltaCT ~ type, data = subset(data, type %in% c("WT_SHAM", "KO_B")))
+t.test(deltaCT ~ type, data = subset(data, type %in% c("WT_SHAM", "KO_C")))
+# t.test(deltaCT ~ type, data = subset(data, type %in% c("WT_SHAM", "KO_D")))
+
+
+
+pw
+# pw$p.value
+
+```
+
+
+
+```{r}
+
+
+library(ggplot2)
+library(ggsignif)
+
+data$type <- factor(data$type, levels = c("WT_SHAM", "KO_SHAM", "KO_A", "KO_B", "KO_C", "KO_D"))
+
+ymax <- max(data$deltaCT, na.rm = TRUE)
+ymin <- min(data$deltaCT, na.rm = TRUE)
+
+p <- ggplot(data, aes(x = type, y = deltaCT, color = type)) +
+  geom_boxplot(outlier.shape = NA, width = 0.6) +
+  geom_jitter(width = 0.12, size = 2) +
+  geom_signif(
+    comparisons = list(
+      c("KO_SHAM", "KO_A"),
+      c("KO_SHAM", "KO_B"),
+      c("KO_SHAM", "KO_C"),
+      c("KO_SHAM", "KO_D"),
+      c("WT_SHAM", "KO_SHAM")
+    ),
+    y_position = c(ymax + 0.3, ymax + 0.8, ymax + 1.3, ymax + 1.8),
+    tip_length = 0.02,
+    map_signif_level = TRUE,
+    test = t.test,
+    color = "black",
+    textsize = 4
+  ) +
+  labs(title = "deltaCt_adj", x = NULL, y = "deltaCt") +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_text(face = "bold")
+  ) +
+  coord_cartesian(ylim = c(ymin - 0.2, ymax + 2.3))
+
+print(p)
+
+ggsave("deltaCt_adj.png", path = "/Users/quinnmle/Documents/Castellani Lab/Mito_2026-03-18", plot = p, width = 10, height = 6)
+
+
+
+```
+
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+fc_summary_all <- plot_data %>%
+  group_by(plot_group) %>%
+  summarise(
+    n = sum(!is.na(deltaCT)),
+    mean_deltaCT = mean(deltaCT, na.rm = TRUE),
+    sd_deltaCT = sd(deltaCT, na.rm = TRUE),
+    se_deltaCT = sd_deltaCT / sqrt(n),
+    tcrit = ifelse(n > 1, qt(0.95, df = n - 1), NA_real_),  # 90% CI
+    .groups = "drop"
+  ) %>%
+  mutate(
+    ddct = mean_deltaCT - ref_mean,
+    ddct_lower = ifelse(n > 1, ddct - tcrit * se_deltaCT, NA_real_),
+    ddct_upper = ifelse(n > 1, ddct + tcrit * se_deltaCT, NA_real_),
+    fold_change = 2^(-ddct),
+    fc_lower = ifelse(n > 1, 2^(-ddct_upper), NA_real_),
+    fc_upper = ifelse(n > 1, 2^(-ddct_lower), NA_real_)
+  )
+fc_summary_all$plot_group <- factor(
+  fc_summary_all$plot_group,
+  levels = c(
+    "Wild-Type Sham\nTransplant",
+    "TFAM-KO Sham\nTransplant",
+    "KO_A",
+    "KO_B",
+    "KO_C",
+    "KO_D"
+  )
+)
+ggplot(fc_summary_all, aes(x = plot_group, y = fold_change)) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  
+  geom_point(size = 3) +
+  
+  geom_errorbar(
+    aes(ymin = fc_lower, ymax = fc_upper),
+    width = 0.12,
+    na.rm = TRUE
+  ) 
+  
+  labs(
+    title = "Fold Change vs TFAM-KO Sham Transplant",
+    x = NULL,
+    y = "Fold Change (2^-ddCt, 90% CI)"
+  ) +
+  
+  theme_classic()
+```
