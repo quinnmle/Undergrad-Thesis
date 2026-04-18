@@ -71,7 +71,10 @@ dds <- dds[rowSums(counts(dds)) >= 10, ]
 print("Number of genes after removing those with less than 10 counts:")
 nrow(dds)
 
-dds <- DESeq(dds)
+dds <- DESeq(dds, useT = TRUE)
+```
+
+```{r}
 
 all_genes_high <- as.data.frame(results(dds, contrast = c("condition", "mito_high", "control")))
 all_genes_high$gene <- rownames(all_genes_high)
@@ -82,70 +85,156 @@ all_genes_low$gene <- rownames(all_genes_low)
 all_genes_hl <- as.data.frame(results(dds, contrast = c("condition", "mito_high", "mito_low")))
 all_genes_hl$gene <- rownames(all_genes_hl)
 
-
-print("Number of genes with padj < 0.05")
-nrow(subset(all_genes_high, !is.na(padj) & padj < 0.05))
-nrow(subset(all_genes_low, !is.na(padj) & padj < 0.05))
-nrow(subset(all_genes_hl, !is.na(padj) & padj < 0.05))
-
-print("Number of genes with padj < 0.05 and log2FC > 2")
-nrow(subset(all_genes_high, !is.na(padj) & padj < 0.05 & log2FoldChange > 2))
-nrow(subset(all_genes_low, !is.na(padj) & padj < 0.05 & log2FoldChange > 2))
-nrow(subset(all_genes_hl, !is.na(padj) & padj < 0.05 & log2FoldChange > 2))
-
-# Subsetting significant genes
-sig_genes_high <- subset(all_genes_high, !is.na(padj) & padj < 0.05 & log2FoldChange > 2 | log2FoldChange < -2)
-sig_genes_low <- subset(all_genes_low, !is.na(padj) & padj < 0.05 & log2FoldChange > 2 | log2FoldChange < -2)
-sig_genes_hl <- subset(all_genes_hl, !is.na(padj) & padj < 0.05, log2FoldChange > 2 | log2FoldChange < -2)
-
-
 ```
-"Number of genes before filtering:"
-[1] 78894
-[1] "Number of genes after removing those with less than 10 counts:"
-[1] 24670
-[1] "Number of genes with padj < 0.05"
-[1] 8701
-[1] 3313
-[1] 9838
-[1] "Number of genes with padj < 0.05 and log2FC > 2"
-[1] 298
-[1] 7
-[1] 477
 
 
 
+Exploring number of signficant genes
+```{r}
+cat("Number of genes with padj < 0.05","\n")
+cat(paste("High vs. ctrl:", 
+            nrow(subset(all_genes_high, 
+                        !is.na(padj) & padj < 0.05))),"\n")
+cat(paste("Low vs. ctrl:", 
+            nrow(subset(all_genes_low, 
+                        !is.na(padj) & padj < 0.05))),"\n")
+cat(paste("High vs. Low:", 
+            nrow(subset(all_genes_hl, 
+                        !is.na(padj) & padj < 0.05))),"\n\n")
 
+cat("Number of genes with padj < 0.01","\n")
+cat(paste("High vs. ctrl:", 
+            nrow(subset(all_genes_high, 
+                        !is.na(padj) & padj < 0.01))),"\n")
+cat(paste("Low vs. ctrl:", 
+            nrow(subset(all_genes_low, 
+                        !is.na(padj) & padj < 0.01))),"\n")
+cat(paste("High vs. Low:", 
+            nrow(subset(all_genes_hl,
+                        !is.na(padj) & padj < 0.01))),"\n\n")
 
+cat("Number of genes with padj < 0.05 and log2FC > 1","\n")
+cat(paste("High vs. ctrl:", 
+            nrow(subset(all_genes_high, 
+                        !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 1))),"\n")
+cat(paste("Low vs. ctrl:", 
+            nrow(subset(all_genes_low, 
+                        !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 1))),"\n")
+cat(paste("High vs. Low:", 
+            nrow(subset(all_genes_hl, 
+                        !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 1))),"\n\n")
 
+cat("Number of genes with padj < 0.01 and log2FC > 1","\n")
+cat(paste("High vs. ctrl:", 
+            nrow(subset(all_genes_high, 
+                        !is.na(padj) & padj < 0.01 & abs(log2FoldChange) > 1))),"\n")
+cat(paste("Low vs. ctrl:", 
+            nrow(subset(all_genes_low, 
+                        !is.na(padj) & padj < 0.01 & abs(log2FoldChange) > 1))),"\n")
+cat(paste("High vs. Low:", 
+            nrow(subset(all_genes_hl, 
+                        !is.na(padj) & padj < 0.01 & abs(log2FoldChange) > 1))),"\n\n")
+
+cat("Number of genes with padj < 0.05 and log2FC > 2","\n")
+cat(paste("High vs. ctrl:", 
+            nrow(subset(all_genes_high, 
+                        !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 2))),"\n")
+cat(paste("Low vs. ctrl:", 
+            nrow(subset(all_genes_low, 
+                        !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 2))),"\n")
+cat(paste("High vs. Low:", 
+            nrow(subset(all_genes_hl, 
+                        !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 2))),"\n")
+
+cat("Number of genes with padj < 0.01 and log2FC > 2","\n")
+cat(paste("High vs. ctrl:", 
+            nrow(subset(all_genes_high, 
+                        !is.na(padj) & padj < 0.01 & abs(log2FoldChange) > 2))),"\n")
+cat(paste("Low vs. ctrl:", 
+            nrow(subset(all_genes_low, 
+                        !is.na(padj) & padj < 0.01 & abs(log2FoldChange) > 2))),"\n")
+cat(paste("High vs. Low:", 
+            nrow(subset(all_genes_hl, 
+                        !is.na(padj) & padj < 0.01 & abs(log2FoldChange) > 2))),"\n\n")
+```
+
+Subsetting significant genes
+```{r}
+# Subsetting significant genes
+sig_genes_high <- subset(all_genes_high, !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 2)
+sig_genes_low <- subset(all_genes_low, !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 2)
+sig_genes_hl <- subset(all_genes_hl, !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 2)
+```
+
+Function for printing number of upregulated and downregulated genes
+```{r}
+calculate_up_down <- function(res_obj, sig_cutoff = 0.05, lfc_cutoff=2) {
+  up <- subset(res_obj, !is.na(padj) & padj < sig_cutoff & log2FoldChange > lfc_cutoff)
+  down <- subset(res_obj, !is.na(padj) & padj < sig_cutoff & log2FoldChange < -lfc_cutoff)
+  cat(deparse(substitute(res_obj)),"\n")
+  cat(paste("Number of significant genes:   ", nrow(res_obj)),"\n")
+  cat(paste("Number of upregulated genes:   ", nrow(up)),"\n")
+  cat(paste("Number of downregulated genes: ", nrow(down)),"\n\n")
+}
+```
+
+Running function
+```{r}
+calculate_up_down(sig_genes_high)
+calculate_up_down(sig_genes_low)
+calculate_up_down(sig_genes_hl)
+```
 
 
 # PCA
 ```{r}
 
-vsd <- vst(dds, blind = FALSE)
-plotPCA(vsd, intgroup = "condition")
-ggsave("PCA.png")
+# vsd <- vst(dds, blind = FALSE)
+# plotPCA(vsd, intgroup = "condition")
+# ggsave("PCA.png")
+
+
+cds=estimateDispersions(dds)
+vsd=varianceStabilizingTransformation(cds)
+plotPCA(vsd,intgroup=c("condition"))
+
+#How to get PCA scree plot?
+
+## calculate the variance for each gene
+rv <- rowVars(assay(vsd))
+
+## select the ntop genes by variance
+select <- order(rv, decreasing=TRUE)[seq_len(min(500, length(rv)))]
+
+## perform a PCA on the data in assay(x) for the selected genes
+pca <- prcomp(t(assay(vsd)[select,]))
+
+## the contribution to the total variance for each component
+percentVar <- (pca$sdev^2 / sum( pca$sdev^2 ))*100
+
+##plot the "percentVar"
+scree_plot=data.frame(percentVar)
+scree_plot[,2] <- c(1:ncol(dds))
+colnames(scree_plot)<- c("variance", "component_number")
+ggplot(scree_plot, mapping=aes(x=component_number, y=variance))+geom_bar(stat="identity")
 
 ```
 
 # Volcano Plot Function
-```{r}
+```{r} 
 
 make_volcano_pdf <- function(res_obj,
                              title_text,
                              outfile,
-                             sig_cutoff = 0.01,
-                             lfc_cutoff = 1,
-                             top_n_up = 8,
-                             top_n_down = 8,
-                             label_padj_cutoff = 0.01,
-                             label_lfc_cutoff = 1) {
+                             sig_cutoff = 0.05,
+                             lfc_cutoff = 2,
+                             top_n_up = 10,
+                             top_n_down = 10) {
 
   df <- as.data.frame(res_obj)
   df$ensembl_gene <- rownames(df)
 
-  df <- df[!is.na(df$log2FoldChange) & !is.na(df$padj), ]
+  df <- df[!is.na(df$log2FoldChange) & !is.na(df$pvalue), ]
   df$neglog10_p <- -log10(df$pvalue)
 
   # Ensembl -> symbol
@@ -161,8 +250,8 @@ make_volcano_pdf <- function(res_obj,
 
   # categories
   df$group <- "Not significant"
-  df$group[!is.na(df$padj) & df$padj < sig_cutoff & df$log2FoldChange >= lfc_cutoff] <- "Upregulated"
-  df$group[!is.na(df$padj) & df$padj < sig_cutoff & df$log2FoldChange <= -lfc_cutoff] <- "Downregulated"
+  df$group[!is.na(df$pvalue) & df$pvalue < sig_cutoff & df$log2FoldChange >= lfc_cutoff] <- "Upregulated"
+  df$group[!is.na(df$pvalue) & df$pvalue < sig_cutoff & df$log2FoldChange <= -lfc_cutoff] <- "Downregulated"
 
   df$group <- factor(df$group, levels = c("Not significant", "Upregulated", "Downregulated"))
 
@@ -170,11 +259,11 @@ make_volcano_pdf <- function(res_obj,
   label_pool <- df[df$group %in% c("Upregulated", "Downregulated"), ]
 
   up_df <- label_pool[label_pool$group == "Upregulated", ]
-  up_df <- up_df[order(up_df$padj, up_df$pvalue, -abs(up_df$log2FoldChange)), ]
+  up_df <- up_df[order(up_df$pvalue, -abs(up_df$log2FoldChange)), ]
   up_df <- head(up_df, top_n_up)
 
   down_df <- label_pool[label_pool$group == "Downregulated", ]
-  down_df <- down_df[order(down_df$padj, down_df$pvalue, -abs(down_df$log2FoldChange)), ]
+  down_df <- down_df[order(down_df$pvalue, -abs(down_df$log2FoldChange)), ]
   down_df <- head(down_df, top_n_down)
 
   lab_df <- rbind(up_df, down_df)
@@ -203,34 +292,35 @@ make_volcano_pdf <- function(res_obj,
     geom_point(
       data = df[df$group == "Upregulated", ],
       color = "#ff0000",
-      size = 1.4,
+      size = 1.2,
+      shape = 1,
       alpha = 0.9
     ) +
+
     geom_point(
       data = df[df$group == "Downregulated", ],
       color = "#1f78b4",
-      size = 1.4,
+      size = 1.2,
+      shape = 1,
       alpha = 0.9
     ) +
     geom_text_repel(
       data = lab_df,
       aes(label = plot_label),
       size = 2.4,
-      box.padding = 0.15,
-      point.padding = 0.08,
-      segment.size = 0.2,
+      box.padding = 0.4,
+      point.padding = 0.2,
       min.segment.length = 0,
-      max.overlaps = Inf
+      force = 10
     ) +
     labs(
       title = title_text,
-      x = "log2(fold change)",
-      y = "-log10(padj)"
+      x = expression(log[2](fold~change)),
+      y = expression(-log[10](italic(P)))
     ) +
-    theme_bw(base_size = 11) +
+    theme_bw() +
     theme(
       plot.title = element_text(face = "bold", hjust = 0.5, size = 11),
-      panel.grid = element_blank(),
       axis.title = element_text(face = "bold"),
       axis.text = element_text(color = "black")
     )
@@ -244,7 +334,7 @@ Making volcano plots
 make_volcano_pdf(
   all_genes_low,
   "Differential Expression in Low Mitochondrial State versus Control",
-  "volcano_mitoLow_vs_control.pdf",
+  "volcano_mitoLow_vs_control.png",
   sig_cutoff = 0.05,
   lfc_cutoff = 2
 )
@@ -252,7 +342,7 @@ make_volcano_pdf(
 make_volcano_pdf(
   all_genes_high,
   "Differential Expression in High Mitochondrial State versus Control",
-  "volcano_mitoHigh_vs_control.pdf",
+  "volcano_mitoHigh_vs_control.png",
   sig_cutoff = 0.05,
   lfc_cutoff = 2
 )
@@ -260,7 +350,7 @@ make_volcano_pdf(
 make_volcano_pdf(
   all_genes_hl,
   "Differential Expression in High versus Low Mitochondrial State",
-  "volcano_mitoHigh_vs_mitoLow.pdf",
+  "volcano_mitoHigh_vs_mitoLow.png",
   sig_cutoff = 0.05,
   lfc_cutoff = 2
 )
@@ -342,6 +432,7 @@ run_go_kegg <- function(res_obj, prefix) {
 
 Running GO/KEGG
 ```{r}
+library(enrichplot)
 run_go_kegg(sig_genes_low, "mitoLow_vs_control")
 run_go_kegg(sig_genes_high, "mitoHigh_vs_control")
 run_go_kegg(sig_genes_hl, "mitoHigh_vs_mitoLow")
@@ -352,6 +443,10 @@ plot_go_kegg <- function(res_obj, prefix) {
   ego_down <- read.csv(paste0(prefix, "_GO_down.csv"))
   kegg_up <- read.csv(paste0(prefix, "_KEGG_up.csv"))
   kegg_down <- read.csv(paste0(prefix, "_KEGG_down.csv"))
+  
+  pdf(paste0(prefix, "_GO_up_dotplot.pdf"))
+  print(dotplot(ego_up, showCategory = 15))
+  dev.off()
   
   pdf(paste0(prefix, "_GO_down_dotplot.pdf"))
   print(dotplot(ego_down, showCategory = 15))
@@ -365,23 +460,8 @@ plot_go_kegg <- function(res_obj, prefix) {
   print(dotplot(ekegg_down, showCategory = 15))
   dev.off()
 
+
 }
-
-go_hi <- read.csv(paste0(prefix, "_GO_up.csv"))
-go_hl <- read.csv(paste0(prefix, "_GO_down.csv"))
-go_down <- read.csv(paste0(prefix, "_KEGG_up.csv"))
-
-pdf(paste0(prefix, "_GO_down_dotplot.pdf"))
-  print(dotplot(ego_down, showCategory = 15))
-  dev.off()
-  
-  pdf(paste0(prefix, "_KEGG_up_dotplot.pdf"))
-  print(dotplot(ekegg_up, showCategory = 15))
-  dev.off()
-
-  pdf(paste0(prefix, "_KEGG_down_dotplot.pdf"))
-  print(dotplot(ekegg_down, showCategory = 15))
-  dev.off()
 
 
 plot_go_kegg(sig_genes_low, "mitoLow_vs_control")
