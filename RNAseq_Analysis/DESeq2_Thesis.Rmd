@@ -11,6 +11,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Set-Up
 ```{r, echo=FALSE}
+
+
 library(DESeq2)
 library(clusterProfiler)
 library(org.Hs.eg.db)
@@ -166,6 +168,13 @@ sig_genes_low <- subset(all_genes_low, !is.na(padj) & padj < 0.05 & abs(log2Fold
 sig_genes_hl <- subset(all_genes_hl, !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 2)
 ```
 
+Removing Ensembl version suffix if present
+```{r}
+sig_genes_high$gene <- sub("\\..*$", "", sig_genes_high$gene)
+sig_genes_low$gene <- sub("\\..*$", "", sig_genes_low$gene)
+sig_genes_hl$gene <- sub("\\..*$", "", sig_genes_hl$gene)
+```
+
 Function for printing number of upregulated and downregulated genes
 ```{r}
 calculate_up_down <- function(res_obj, sig_cutoff = 0.05, lfc_cutoff=2) {
@@ -175,6 +184,8 @@ calculate_up_down <- function(res_obj, sig_cutoff = 0.05, lfc_cutoff=2) {
   cat(paste("Number of significant genes:   ", nrow(res_obj)),"\n")
   cat(paste("Number of upregulated genes:   ", nrow(up)),"\n")
   cat(paste("Number of downregulated genes: ", nrow(down)),"\n\n")
+  write.csv(up, paste0(deparse(substitute(res_obj)), "_upregulated.csv"))
+  write.csv(down, paste0(deparse(substitute(res_obj)), "_downregulated.csv"))
 }
 ```
 
@@ -356,123 +367,237 @@ make_volcano_pdf(
 )
 ```
 
-
-GO/KEGG Function
+Reading-in Upregulated and Downregulated Genes
 ```{r}
-run_go_kegg <- function(res_obj, prefix) {
-  res_df <- as.data.frame(res_obj)
-  res_df$gene <- rownames(res_df)
+# up_high <- as.data.frame(read.csv(paste0("sig_genes_high", "_upregulated.csv")))
+# down_high <- as.data.frame(read.csv(paste0("sig_genes_high", "_downregulated.csv")))
+# 
+# up_low <- as.data.frame(read.csv(paste0("sig_genes_low", "_upregulated.csv")))
+# down_low <- as.data.frame(read.csv(paste0("sig_genes_low", "_downregulated.csv")))
+# 
+# up_hl <- as.data.frame(read.csv(paste0("sig_genes_hl", "_upregulated.csv")))
+# down_hl <- as.data.frame(read.csv(paste0("sig_genes_hl", "_downregulated.csv")))
 
-  # remove Ensembl version suffix if present
-  res_df$gene <- sub("\\..*$", "", res_df$gene)
 
-  # significant genes
-  sig_up <- subset(res_df, !is.na(padj) & padj < 0.05 & log2FoldChange > 2)
-  sig_down <- subset(res_df, !is.na(padj) & padj < 0.05 & log2FoldChange < -2)
 
-  write.csv(sig_up, paste0(prefix, "_sig_up.csv"), row.names = FALSE)
-  write.csv(sig_down, paste0(prefix, "_sig_down.csv"), row.names = FALSE)
-
-  # ID conversion
-  up_map <- bitr(sig_up$gene,
+symbol_ids <- bitr(sig_genes_hl$gene,
                  fromType = "ENSEMBL",
-                 toType = c("ENTREZID", "SYMBOL"),
+                 toType = "SYMBOL",
                  OrgDb = org.Hs.eg.db)
 
-  down_map <- bitr(sig_down$gene,
-                   fromType = "ENSEMBL",
-                   toType = c("ENTREZID", "SYMBOL"),
-                   OrgDb = org.Hs.eg.db)
+sting_genes <- c(
+  "TMEM173","TBK1","IRF3","IFNB1","CXCL10","CCL5",
+  "ISG15","IFIT1","IFIT2","MX1","MX2","OAS1","OAS2","IRF7"
+)
 
-  # GO
-  ego_up <- enrichGO(
-    gene = unique(up_map$ENTREZID),
-    OrgDb = org.Hs.eg.db,
-    keyType = "ENTREZID",
-    ont = "BP",
-    pAdjustMethod = "BH",
-    pvalueCutoff = 0.05,
-    qvalueCutoff = 0.05,
-    readable = TRUE
-  )
+symbol_ids %>%
+  filter(SYMBOL %in% sting_genes)
 
-  ego_down <- enrichGO(
-    gene = unique(down_map$ENTREZID),
-    OrgDb = org.Hs.eg.db,
-    keyType = "ENTREZID",
-    ont = "BP",
-    pAdjustMethod = "BH",
-    pvalueCutoff = 0.05,
-    qvalueCutoff = 0.05,
-    readable = TRUE
-  )
 
-  # KEGG
-  ekegg_up <- enrichKEGG(
-    gene = unique(up_map$ENTREZID),
-    organism = "hsa",
-    pvalueCutoff = 0.05
-  )
+ifn_genes <- c(
+  "IFNB1","CXCL10","CCL5","ISG15","IFIT1","IFIT2","IFIT3",
+  "MX1","MX2","OAS1","OAS2","OAS3","IFI6","IFI27","IFI44",
+  "IFI44L","IRF7","STAT1","RSAD2"
+)
 
-  ekegg_down <- enrichKEGG(
-    gene = unique(down_map$ENTREZID),
-    organism = "hsa",
-    pvalueCutoff = 0.05
-  )
-
-  # save tables
-  write.csv(as.data.frame(ego_up), paste0(prefix, "_GO_up.csv"), row.names = FALSE)
-  write.csv(as.data.frame(ego_down), paste0(prefix, "_GO_down.csv"), row.names = FALSE)
-  write.csv(as.data.frame(ekegg_up), paste0(prefix, "_KEGG_up.csv"), row.names = FALSE)
-  write.csv(as.data.frame(ekegg_down), paste0(prefix, "_KEGG_down.csv"), row.names = FALSE)
-}
-
+symbol_ids %>%
+  filter(SYMBOL %in% ifn_genes)
 ```
 
-
-Running GO/KEGG
+GO Function (includes bar plot and manhattan plot)
 ```{r}
-library(enrichplot)
-run_go_kegg(sig_genes_low, "mitoLow_vs_control")
-run_go_kegg(sig_genes_high, "mitoHigh_vs_control")
-run_go_kegg(sig_genes_hl, "mitoHigh_vs_mitoLow")
-
-# save plots
-plot_go_kegg <- function(res_obj, prefix) {
-  ego_up <- read.csv(paste0(prefix, "_GO_up.csv"))
-  ego_down <- read.csv(paste0(prefix, "_GO_down.csv"))
-  kegg_up <- read.csv(paste0(prefix, "_KEGG_up.csv"))
-  kegg_down <- read.csv(paste0(prefix, "_KEGG_down.csv"))
+run_go <- function(res_obj) {
   
-  pdf(paste0(prefix, "_GO_up_dotplot.pdf"))
-  print(dotplot(ego_up, showCategory = 15))
-  dev.off()
+  res_df <- as.data.frame(res_obj)
+
+  go_res <- enrichGO(
+    gene = unique(res_obj$gene),
+    keyType = "ENSEMBL",
+    OrgDb = org.Hs.eg.db,
+    ont = "ALL",
+    pvalueCutoff = 0.05,
+  )
   
-  pdf(paste0(prefix, "_GO_down_dotplot.pdf"))
-  print(dotplot(ego_down, showCategory = 15))
-  dev.off()
+  go_res@result$neglogpadj <- -log10(go_res@result$p.adjust)
+
+  p <- barplot(
+    go_res,
+    x = "neglogpadj",
+    showCategory = 10,
+    split = "ONTOLOGY",
+    label_format = 50
+  ) +
+    aes(fill = ONTOLOGY) +
+    scale_fill_brewer(palette = "Set2") +
+    enrichplot::autofacet(by = "row", scales = "free")
+
+
+  ggsave(paste0(deparse(substitute(res_obj)), "_GO_barplot.png"))
   
-  pdf(paste0(prefix, "_KEGG_up_dotplot.pdf"))
-  print(dotplot(ekegg_up, showCategory = 15))
-  dev.off()
-
-  pdf(paste0(prefix, "_KEGG_down_dotplot.pdf"))
-  print(dotplot(ekegg_down, showCategory = 15))
-  dev.off()
-
-
+  return(go_res)
 }
+```
 
 
-plot_go_kegg(sig_genes_low, "mitoLow_vs_control")
-plot_go_kegg(sig_genes_high, "mitoHigh_vs_control")
-plot_go_kegg(sig_genes_hl, "mitoHigh_vs_mitoLow")
+Running GO Function
+```{r}
+# up_high_go_res <- run_go(up_high)
+# down_high_go_res <- run_go(down_high)
+# 
+# up_low_go_res <- run_go(up_low)
+# down_low_go_res <- run_go(down_low)
+# 
+# up_hl_go_res <- run_go(up_hl)
+# down_hl_go_res <- run_go(down_hl)
+
+high_go_res <- run_go(sig_genes_high)
+low_go_res <- run_go(sig_genes_low)
+hl_go_res <- run_go(sig_genes_hl)
+
+high_go_res_simplified <- simplify(high_go_res, cutoff=0.7, by="p.adjust", select_fun=min)
+low_go_res_simplified <- simplify(low_go_res, cutoff=0.7, by="p.adjust", select_fun=min)
+hl_go_res_simplified <- simplify(hl_go_res, cutoff=0.7, by="p.adjust", select_fun=min)
+
+```
+
+Calculating similarity matrix and reducing GO terms
+```{r}
+# library(rrvgo)
+# 
+# go_analysis <- high_go_res
+# 
+# simMatrix <- calculateSimMatrix(go_analysis$ID,
+#                                 orgdb="org.Hs.eg.db",
+#                                 ont="BP",
+#                                 method="Rel")
+# 
+# scores <- setNames(-log10(go_analysis$qvalue), go_analysis$ID)
+# reducedTerms <- reduceSimMatrix(simMatrix,
+#                                 scores,
+#                                 threshold=0.7,
+#                                 orgdb="org.Hs.eg.db")
+# 
+# heatmapPlot(simMatrix,
+#             reducedTerms,
+#             annotateParent=TRUE,
+#             annotationLabel="parentTerm",
+#             fontsize=6)
+# 
+# scatterPlot(simMatrix, reducedTerms)
+# 
+# treemapPlot(reducedTerms)
+```
+
+Calculating similarity matrix and reducing GO terms
+```{r}
+# go_analysis <- hl_go_res
+# 
+# simMatrix <- calculateSimMatrix(go_analysis$ID,
+#                                 orgdb="org.Hs.eg.db",
+#                                 ont="BP",
+#                                 method="Rel")
+# 
+# scores <- setNames(-log10(go_analysis$pvalue), go_analysis$ID)
+# reducedTerms <- reduceSimMatrix(simMatrix,
+#                                 scores,
+#                                 threshold=0.7,
+#                                 orgdb="org.Hs.eg.db")
+# 
+# 
+# scatterPlot(simMatrix, reducedTerms)
+# 
+# treemapPlot(reducedTerms)
+```
+
+Calculating similarity matrix and reducing GO terms
+```{r}
+# go_analysis <- low_go_res
+# 
+# simMatrix_low <- calculateSimMatrix(go_analysis$ID,
+#                                 orgdb="org.Hs.eg.db",
+#                                 ont="BP",
+#                                 method="Rel")
+# 
+# scores_low <- setNames(-log10(go_analysis$pvalue), go_analysis$ID)
+# reducedTerms_low <- reduceSimMatrix(simMatrix_low,
+#                                 scores_low,
+#                                 threshold=0.7,
+#                                 orgdb="org.Hs.eg.db")
+# 
+# 
+# scatterPlot(simMatrix_low, reducedTerms_low)
+# 
+# treemapPlot(reducedTerms_low)
 ```
 
 
 
+KEGG Function
+```{r}
+run_kegg <- function(res_obj) {
+  
+  res_df <- as.data.frame(res_obj)
+
+  entrez_ids <- bitr(res_df$gene,
+                 fromType = "ENSEMBL",
+                 toType = "ENTREZID",
+                 OrgDb = org.Hs.eg.db)
+
+  kegg_res <- enrichKEGG(
+    gene = unique(entrez_ids$ENTREZID),
+    organism = "hsa",
+    pvalueCutoff = 0.05
+  )
+  
+  # Makes a dot plot of the results
+  dotplot(kegg_res, showCategory = 15)
+  ggsave(paste0(deparse(substitute(res_obj)), "_KEGG_dotplot.png"))
+  
+  return(kegg_res)
+}
+```
+
+Running KEGG
+```{r}
+# up_high_kegg_res <- run_kegg(up_high)
+# down_high_kegg_res <- run_kegg(down_high)
+# 
+# up_low_kegg_res <- run_kegg(up_low)
+# # down_low_kegg_res <- run_kegg(down_low)# only one gene
+# 
+# up_hl_kegg_res <- run_kegg(up_hl) 
+# down_hl_kegg_res <- run_kegg(down_hl)
+# 
+# nrow(up_high_kegg_res)
+# nrow(down_high_kegg_res)
+# nrow(up_low_kegg_res)
+# nrow(up_hl_kegg_res)
+# nrow(down_hl_kegg_res)
+
+high_kegg_res <- run_kegg(sig_genes_high)
+low_kegg_res <- run_kegg(sig_genes_low)
+hl_kegg_res <- run_kegg(sig_genes_hl)
 
 
+```
 
+```{r}
+library(ggtree)
+
+edox2 <- pairwise_termsim(high_go_res)
+edox3 <- pairwise_termsim(low_go_res)
+edox4 <- pairwise_termsim(hl_go_res)
+
+treeplot(edox2)
+treeplot(edox3)
+treeplot(edox4)
+
+ssplot(edox2, group_category = FALSE, node_label = "group")
+ggsave("high_go_ssplot.png")
+ssplot(edox3, group_category = FALSE, node_label = "group")
+ggsave("low_go_ssplot.png")
+ssplot(edox4, group_category = FALSE, node_label = "group")
+ggsave("hl_go_ssplot.png")
+```
 
 
