@@ -274,31 +274,28 @@ fold_change <- c(2^(KO11_A_dCt_mean-KO11_NC_dCt_mean),
                  2^(KO11_D_dCt_mean-KO11_NC_dCt_mean))
 
 fold_change
+```
 
+```{r}
 library(dplyr)
 library(ggplot2)
 
-# ---- Step 1: Define groups ----
+# ---- Define groups and reference ----
 plot_data <- data %>%
   mutate(
     group = case_when(
-      type == "KO_A" ~ "KO_A",
-      type == "KO_B" ~ "KO_B",
-      type == "KO_C" ~ "KO_C",
-      type == "KO_D" ~ "KO_D",
-      type == "KO_SHAM" ~ "KO_SHAM",
+      type %in% c("KO_A", "KO_B", "KO_C", "KO_D", "KO_SHAM") ~ type,
       TRUE ~ NA_character_
     )
   ) %>%
   filter(!is.na(group))
 
-# ---- Step 2: Get reference mean (KO_SHAM) ----
 ref_mean <- plot_data %>%
   filter(group == "KO_SHAM") %>%
   summarise(mean_ref = mean(deltaCT, na.rm = TRUE)) %>%
   pull(mean_ref)
 
-# ---- Step 3: Summarise ALL groups ----
+# ---- Summarise and calculate fold change ----
 fc_df <- plot_data %>%
   group_by(group) %>%
   summarise(
@@ -306,50 +303,41 @@ fc_df <- plot_data %>%
     mean_dCt = mean(deltaCT, na.rm = TRUE),
     sd_dCt = sd(deltaCT, na.rm = TRUE),
     se_dCt = sd_dCt / sqrt(n),
-    tcrit = qt(0.975, df = n - 1),  # 90% CI
+    tcrit = qt(0.975, df = n - 1),
     .groups = "drop"
   ) %>%
   mutate(
     ddct = mean_dCt - ref_mean,
     ddct_lower = ddct - tcrit * se_dCt,
     ddct_upper = ddct + tcrit * se_dCt,
-
-    # YOUR definition
     fold_change = 2^(ddct),
     fc_lower = 2^(ddct_lower),
-    fc_upper = 2^(ddct_upper)
-  ) %>%
-  filter(group != "KO_SHAM") %>%  # remove reference from plot if you want
-  mutate(
-    group = factor(group, levels = c("KO_A", "KO_B", "KO_C", "KO_D"))
+    fc_upper = 2^(ddct_upper),
+    label = round(fold_change, 2),
+    group = factor(group, levels = c("KO_SHAM", "KO_A", "KO_B", "KO_C", "KO_D"))
   )
 
-# ---- Step 4: Plot ----
+# ---- Plot ----
 p <- ggplot(fc_df, aes(x = group, y = fold_change)) +
-  geom_hline(yintercept = 1, linetype = "dashed") +
-  
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray50") +
   geom_point(size = 3) +
-  
-  geom_errorbar(
-    aes(ymin = fc_lower, ymax = fc_upper),
-    width = 0.12
-  ) +
-  
-  scale_y_continuous(
-    breaks = c(0, 1, 2, 4, 6, 8, 10)
-  ) +
-  
+  geom_errorbar(aes(ymin = fc_lower, ymax = fc_upper), width = 0.12) +
+  geom_text(aes(label = label, y = fc_upper + 0.5), size = 4) +
   labs(
-    title = "Fold Change vs KO Sham",
+    title = "Fold Change vs KO_SHAM",
     x = NULL,
     y = "Fold Change"
   ) +
-  
-  theme_classic()
+  theme_classic(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(face = "bold"),
+    axis.title.y = element_text(face = "bold")
+  )
 
 print(p)
 
-# ---- Step 5: Save ----
+# ---- Save ----
 ggsave(
   "fold_change_CI.png",
   plot = p,
@@ -357,7 +345,6 @@ ggsave(
   height = 4,
   dpi = 300
 )
-
 
 
 ```
@@ -500,12 +487,9 @@ pw <- pairwise.t.test(
 t.test(deltaCT ~ type, data = subset(data, type %in% c("KO_SHAM", "KO_A")))
 t.test(deltaCT ~ type, data = subset(data, type %in% c("KO_SHAM", "KO_B")))
 t.test(deltaCT ~ type, data = subset(data, type %in% c("KO_SHAM", "KO_C")))
-# t.test(deltaCT ~ type, data = subset(data, type %in% c("KO_SHAM", "KO_D")))
+t.test(deltaCT ~ type, data = subset(data, type %in% c("KO_SHAM", "KO_D")))
 t.test(deltaCT ~ type, data = subset(data, type %in% c("KO_SHAM", "WT_SHAM")))
-t.test(deltaCT ~ type, data = subset(data, type %in% c("WT_SHAM", "KO_A")))
-t.test(deltaCT ~ type, data = subset(data, type %in% c("WT_SHAM", "KO_B")))
-t.test(deltaCT ~ type, data = subset(data, type %in% c("WT_SHAM", "KO_C")))
-# t.test(deltaCT ~ type, data = subset(data, type %in% c("WT_SHAM", "KO_D")))
+
 
 
 
@@ -517,7 +501,6 @@ pw
 
 
 ```{r}
-
 
 library(ggplot2)
 library(ggsignif)
@@ -536,9 +519,9 @@ p <- ggplot(data, aes(x = type, y = deltaCT, color = type)) +
       c("KO_SHAM", "KO_B"),
       c("KO_SHAM", "KO_C"),
       c("KO_SHAM", "KO_D"),
-      c("WT_SHAM", "KO_SHAM")
+      c("KO_SHAM", "WT_SHAM")
     ),
-    y_position = c(ymax + 0.3, ymax + 0.8, ymax + 1.3, ymax + 1.8),
+    y_position = c(ymax + 0.8, ymax + 1.3, ymax + 1.8, ymax + 2.3, ymax + 0.3),
     tip_length = 0.02,
     map_signif_level = TRUE,
     test = t.test,
@@ -552,11 +535,11 @@ p <- ggplot(data, aes(x = type, y = deltaCT, color = type)) +
     axis.text.x = element_text(angle = 45, hjust = 1),
     axis.title = element_text(face = "bold")
   ) +
-  coord_cartesian(ylim = c(ymin - 0.2, ymax + 2.3))
+  coord_cartesian(ylim = c(ymin - 0.2, ymax + 3))
 
 print(p)
 
-ggsave("deltaCt_adj.png", path = "/Users/quinnmle/Documents/Castellani Lab/Mito_2026-03-18", plot = p, width = 10, height = 6)
+ggsave("deltaCt_adj.png", path = "/Users/quinnmle/Documents/Castellani Lab/Mito_2026-03-18")
 
 
 
@@ -567,6 +550,7 @@ ggsave("deltaCt_adj.png", path = "/Users/quinnmle/Documents/Castellani Lab/Mito_
 ```{r}
 library(dplyr)
 library(ggplot2)
+
 fc_summary_all <- plot_data %>%
   group_by(plot_group) %>%
   summarise(
@@ -585,6 +569,7 @@ fc_summary_all <- plot_data %>%
     fc_lower = ifelse(n > 1, 2^(-ddct_upper), NA_real_),
     fc_upper = ifelse(n > 1, 2^(-ddct_lower), NA_real_)
   )
+
 fc_summary_all$plot_group <- factor(
   fc_summary_all$plot_group,
   levels = c(
@@ -596,22 +581,19 @@ fc_summary_all$plot_group <- factor(
     "KO_D"
   )
 )
+
 ggplot(fc_summary_all, aes(x = plot_group, y = fold_change)) +
   geom_hline(yintercept = 1, linetype = "dashed") +
-  
   geom_point(size = 3) +
-  
   geom_errorbar(
     aes(ymin = fc_lower, ymax = fc_upper),
     width = 0.12,
     na.rm = TRUE
-  ) 
-  
+  ) +
   labs(
     title = "Fold Change vs TFAM-KO Sham Transplant",
     x = NULL,
     y = "Fold Change (2^-ddCt, 90% CI)"
   ) +
-  
   theme_classic()
 ```
